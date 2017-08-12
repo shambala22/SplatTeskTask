@@ -1,17 +1,22 @@
+import org.apache.commons.validator.routines.UrlValidator;
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.border.LineBorder;
 import javax.swing.filechooser.FileSystemView;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeCellRenderer;
 import javax.swing.tree.DefaultTreeModel;
 import java.awt.*;
 import java.io.*;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.concurrent.ForkJoinPool;
 
 /**
  * Created by shambala on 09.08.17.
  */
-public class LogSearch{
+public class LogSearch {
     public static final String TITLE = "Log search";
     private JTree fileTree;
     private DefaultTreeModel treeModel;
@@ -21,20 +26,21 @@ public class LogSearch{
     private JTextArea fileText;
     private JButton selectPath;
     private JFileChooser chooser;
+    private JTextField pathField;
+    private JTextField extensionField;
 
     private File searchPath = new File("/");
 
     private final ForkJoinPool forkJoinPool = new ForkJoinPool();
-
+    private final UrlValidator urlValidator = new UrlValidator();
 
     private Container getGUI() {
         gui = new JPanel(new BorderLayout(3,3));
         gui.setBorder(new EmptyBorder(5,5,5,5));
-        gui.setSize(100, 100);
         JPanel topPanel = new JPanel();
-        topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
+        topPanel.setLayout(new GridBagLayout());
         JTextField searchField = new JTextField();
-        topPanel.add(searchField);
+
         gui.add(topPanel, BorderLayout.NORTH);
         fileSystemView = FileSystemView.getFileSystemView();
         fileView = new JPanel(new BorderLayout(3,3));
@@ -45,11 +51,27 @@ public class LogSearch{
         fileView.add(new JScrollPane(fileText));
         DefaultMutableTreeNode root = new DefaultMutableTreeNode();
         treeModel = new DefaultTreeModel(root);
-
         searchField.addActionListener(actionEvent -> {
-            searchFiles(root, searchField.getText(), searchPath, "log");
-            searchField.setText("");
+            if (new File(pathField.getText()).exists()) {
+                searchPath = new File(pathField.getText());
+            } else if (urlValidator.isValid(pathField.getText())) {
+                try {
+                    searchPath = new File(new URI(pathField.getText()));
+                } catch (URISyntaxException e) {
+                    JOptionPane.showMessageDialog(gui, "Path doesn't exist");
+                }
+            } else {
+                JOptionPane.showMessageDialog(gui, "Path doesn't exist");
+                return;
+            }
+            if (searchPath.isDirectory()) {
+                searchFiles(root, searchField.getText(), new File(pathField.getText()), extensionField.getText());
+                searchField.setText("");
+            } else {
+                JOptionPane.showMessageDialog(gui, "Path is not a directory");
+            }
         });
+        pathField = new JTextField("/");
 
         selectPath = new JButton("Select path");
         selectPath.addActionListener(event -> {
@@ -61,9 +83,26 @@ public class LogSearch{
             //
             if (chooser.showOpenDialog(gui) == JFileChooser.APPROVE_OPTION) {
                 searchPath = chooser.getSelectedFile();
+                pathField.setText(chooser.getSelectedFile().getAbsolutePath());
             }
         });
-        topPanel.add(selectPath);
+
+
+        GridBagConstraints left = new GridBagConstraints();
+        left.anchor = GridBagConstraints.EAST;
+        GridBagConstraints right = new GridBagConstraints();
+        right.weightx = 2.0;
+        right.fill = GridBagConstraints.HORIZONTAL;
+        right.gridwidth = GridBagConstraints.REMAINDER;
+        topPanel.add(new JLabel("Search "), left);
+        //searchField.setBorder(new LineBorder(Color.black));
+        topPanel.add(searchField, right);
+        extensionField = new JTextField("log");
+        topPanel.add(new JLabel("Extension "), left);
+        topPanel.add(extensionField, right);
+        topPanel.add(selectPath, left);
+        //pathField.setBorder(new LineBorder(Color.black));
+        topPanel.add(pathField, right);
 
         fileTree = new JTree(treeModel);
         fileTree.setRootVisible(false);
@@ -79,6 +118,7 @@ public class LogSearch{
                 JSplitPane.HORIZONTAL_SPLIT,
                 treeScroll,
                 fileView);
+        splitPane.setDividerLocation(200);
         gui.add(splitPane, BorderLayout.CENTER);
         return gui;
     }
@@ -130,10 +170,11 @@ public class LogSearch{
             frame.setContentPane(search.getGUI());
 
             frame.pack();
-            frame.setMinimumSize(frame.getSize());
+            frame.setSize(new Dimension(600, 600));
             frame.setVisible(true);
         });
     }
+
 
     class FileTreeCellRenderer extends DefaultTreeCellRenderer {
 
