@@ -7,6 +7,7 @@ import javax.swing.filechooser.FileSystemView;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultHighlighter;
 import javax.swing.text.Document;
+import javax.swing.text.Highlighter;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeCellRenderer;
 import javax.swing.tree.DefaultTreeModel;
@@ -31,16 +32,23 @@ public class LogSearch {
     private JFileChooser chooser;
     private JTextField pathField;
     private JTextField extensionField;
-    private JPanel fileView;
     private JProgressBar progressBar;
 
     private File searchPath = new File("/");
 
     private final ForkJoinPool forkJoinPool = new ForkJoinPool();
     private final UrlValidator urlValidator = new UrlValidator();
+    private final DefaultHighlighter.DefaultHighlightPainter yellowHighlightPainter =
+            new DefaultHighlighter.DefaultHighlightPainter(Color.YELLOW);
+    private final DefaultHighlighter.DefaultHighlightPainter orangeHighlightPainter =
+            new DefaultHighlighter.DefaultHighlightPainter(Color.ORANGE);
 
     private java.util.List<Integer> positions;
     private String lastRequest;
+    private Map<Integer, Highlighter.Highlight> highlights;
+    private SwingWorker<Void, Integer> loadFileWorker;
+    private SwingWorker<Void, DefaultMutableTreeNode> searchFilesWorker;
+    private int positionsIndex = 0;
 
     private Container getGUI() {
         gui = new JPanel(new BorderLayout(3,3));
@@ -51,7 +59,7 @@ public class LogSearch {
         progressBar = new JProgressBar();
         gui.add(topPanel, BorderLayout.NORTH);
         fileSystemView = FileSystemView.getFileSystemView();
-        fileView = new JPanel(new BorderLayout(3, 3));
+        JPanel fileView = new JPanel(new BorderLayout(3, 3));
         fileText = new JTextArea();
         fileText.setWrapStyleWord(true);
         fileText.setLineWrap(true);
@@ -66,6 +74,13 @@ public class LogSearch {
         navigationButtons.add(previousButton, buttonsConstraints);
         navigationButtons.add(nextButton, buttonsConstraints);
         fileView.add(navigationButtons, BorderLayout.NORTH);
+
+        previousButton.addActionListener(event -> {
+            changeSelection(false);
+        });
+        nextButton.addActionListener(event -> {
+            changeSelection(true);
+        });
         DefaultMutableTreeNode root = new DefaultMutableTreeNode();
         treeModel = new DefaultTreeModel(root);
         searchField.addActionListener(actionEvent -> {
@@ -76,18 +91,21 @@ public class LogSearch {
                     searchPath = new File(new URI(pathField.getText()));
                 } catch (URISyntaxException e) {
                     JOptionPane.showMessageDialog(gui, "Path doesn't exist");
+                } catch (IllegalArgumentException e) {
+                    JOptionPane.showMessageDialog(gui, "This URI is not file");
                 }
             } else {
                 JOptionPane.showMessageDialog(gui, "Path doesn't exist");
                 return;
             }
             if (searchPath.isDirectory()) {
-                progressBar.setIndeterminate(true);
-                root.removeAllChildren();
                 lastRequest = searchField.getText();
-                searchFiles(root, lastRequest, new File(pathField.getText()), extensionField.getText());
+                if (searchFilesWorker != null && !searchFilesWorker.isDone()) {
+                    searchFilesWorker.cancel(true);
+                }
+                searchFilesWorker = searchFiles(root, lastRequest, new File(pathField.getText()), extensionField.getText());
                 searchField.setText("");
-                progressBar.setIndeterminate(false);
+                searchFilesWorker.execute();
             } else {
                 JOptionPane.showMessageDialog(gui, "Path is not a directory");
             }
@@ -101,7 +119,6 @@ public class LogSearch {
             chooser.setDialogTitle("Choose directory");
             chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
             chooser.setAcceptAllFileFilterUsed(false);
-            //
             if (chooser.showOpenDialog(gui) == JFileChooser.APPROVE_OPTION) {
                 searchPath = chooser.getSelectedFile();
                 pathField.setText(chooser.getSelectedFile().getAbsolutePath());
@@ -116,13 +133,11 @@ public class LogSearch {
         right.fill = GridBagConstraints.HORIZONTAL;
         right.gridwidth = GridBagConstraints.REMAINDER;
         topPanel.add(new JLabel("Search "), left);
-        //searchField.setBorder(new LineBorder(Color.black));
         topPanel.add(searchField, right);
         extensionField = new JTextField("log");
         topPanel.add(new JLabel("Extension "), left);
         topPanel.add(extensionField, right);
         topPanel.add(selectPath, left);
-        //pathField.setBorder(new LineBorder(Color.black));
         topPanel.add(pathField, right);
 
         fileTree = new JTree(treeModel);
@@ -130,7 +145,13 @@ public class LogSearch {
         fileTree.addTreeSelectionListener(treeSelectionEvent -> {
             DefaultMutableTreeNode node =
                     (DefaultMutableTreeNode)treeSelectionEvent.getPath().getLastPathComponent();
-            loadFile((File)node.getUserObject());
+            if (!((File)node.getUserObject()).isDirectory()) {
+                if (loadFileWorker != null && !loadFileWorker.isDone()) {
+                    System.out.println(loadFileWorker.cancel(true));
+                }
+                loadFileWorker = loadFile((File) node.getUserObject());
+                loadFileWorker.execute();
+            }
         });
         fileTree.setCellRenderer(new FileTreeCellRenderer());
 
@@ -145,10 +166,39 @@ public class LogSearch {
         return gui;
     }
 
+    private void changeSelection(boolean isIncrement) {
+        if (positions.size() > 0) {
+            try {
+                fileText.getHighlighter().removeHighlight(highlights.get(positions.get(positionsIndex)));
+                fileText.getHighlighter().addHighlight(positions.get(positionsIndex), positions.get(positionsIndex) + lastRequest.length(),
+                        yellowHighlightPainter);
+                highlights.put(positions.get(positionsIndex), fileText.getHighlighter().getHighlights()[fileText.getHighlighter().getHighlights().length - 1]);
+                if (isIncrement) {
+                    positionsIndex++;
+                } else positionsIndex--;
+                if (positionsIndex >= positions.size()) {
+                    positionsIndex = 0;
+                }
+                if (positionsIndex < 0) {
+                    positionsIndex = positions.size() - 1;
+                }
+                fileText.getHighlighter().removeHighlight(highlights.get(positions.get(positionsIndex)));
+                fileText.getHighlighter().addHighlight(positions.get(positionsIndex), positions.get(positionsIndex) + lastRequest.length(),
+                        orangeHighlightPainter);
+                highlights.put(positions.get(positionsIndex), fileText.getHighlighter().getHighlights()[fileText.getHighlighter().getHighlights().length - 1]);
+                fileText.setCaretPosition(positions.get(positionsIndex));
+            } catch (BadLocationException e) {
+                e.printStackTrace();
+            }
+        }
+    }
 
-    private void searchFiles(final DefaultMutableTreeNode root, String searchRequest, File path, final String extension) {
+
+    private SwingWorker<Void, DefaultMutableTreeNode> searchFiles(final DefaultMutableTreeNode root, String searchRequest, File path, final String extension) {
         fileTree.setEnabled(false);
-        SwingWorker<Void, DefaultMutableTreeNode> worker = new SwingWorker<Void, DefaultMutableTreeNode>() {
+        progressBar.setIndeterminate(true);
+        root.removeAllChildren();
+        return new SwingWorker<Void, DefaultMutableTreeNode>() {
             @Override
             protected Void doInBackground() throws Exception {
                 for (File fileRoot : fileSystemView.getFiles(path, true)) {
@@ -168,59 +218,28 @@ public class LogSearch {
             protected void done() {
                 treeModel.reload(root);
                 fileTree.setEnabled(true);
+                progressBar.setIndeterminate(false);
             }
         };
-        worker.execute();
     }
 
-    private void loadFile(File file) {
-        if (!file.isDirectory()) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-                progressBar.setIndeterminate(true);
-                fileText.read(reader, "Text");
-                findAllWords(lastRequest);
-                progressBar.setIndeterminate(false);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            fileText.setCaretPosition(0);
-        }
-    }
-
-    private void findAllWords(String request) {
-        Document document = fileText.getDocument();
-
-/*
-        positions = new ArrayList<>();
-        try {
-            fileText.getHighlighter().removeAllHighlights();
-            for (int index = 0; index + request.length() < document.getLength(); index++) {
-                progressBar.setValue(index);
-                String match = document.getText(index, request.length());
-                if (request.equals(match)) {
-                    positions.add(index);
-                    DefaultHighlighter.DefaultHighlightPainter highlightPainter =
-                            new DefaultHighlighter.DefaultHighlightPainter(Color.YELLOW);
-                    fileText.getHighlighter().addHighlight(index, index + request.length(),
-                            highlightPainter);
-                }
-            }
-        } catch (BadLocationException e) {
-            e.printStackTrace();
-        }
-        progressBar.setValue(0);
-        */
-        SwingWorker<Void, Integer> worker = new SwingWorker<Void, Integer>() {
+    private SwingWorker<Void, Integer> loadFile(File file) {
+        highlights = new HashMap<>();
+        progressBar.setIndeterminate(true);
+        return new SwingWorker<Void, Integer>() {
             @Override
             protected Void doInBackground() throws Exception {
-                try {
-                    for (int index = 0; index + request.length() < document.getLength(); index++) {
-                        String match = document.getText(index, request.length());
-                        if (request.equals(match)) {
+                try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+                    fileText.read(reader, "Text");
+                    fileText.getHighlighter().removeAllHighlights();
+                    Document document = fileText.getDocument();
+                    for (int index = 0; index + lastRequest.length() < document.getLength(); index++) {
+                        String match = document.getText(index, lastRequest.length());
+                        if (lastRequest.equals(match)) {
                             publish(index);
                         }
                     }
-                } catch (BadLocationException e) {
+                } catch (BadLocationException | IOException e) {
                     e.printStackTrace();
                 }
                 return null;
@@ -231,17 +250,33 @@ public class LogSearch {
                 positions = new ArrayList<>(chunks);
                 try {
                     for (int position : positions) {
-                        DefaultHighlighter.DefaultHighlightPainter highlightPainter =
-                                new DefaultHighlighter.DefaultHighlightPainter(Color.YELLOW);
-                        fileText.getHighlighter().addHighlight(position, position + request.length(),
-                                highlightPainter);
+                        fileText.getHighlighter().addHighlight(position, position + lastRequest.length(),
+                                yellowHighlightPainter);
+                        Highlighter.Highlight[] currentHighlights = fileText.getHighlighter().getHighlights();
+                        highlights.put(position, currentHighlights[currentHighlights.length - 1]);
                     }
                 } catch (BadLocationException e) {
                     e.printStackTrace();
                 }
             }
+
+            @Override
+            protected void done() {
+                try {
+                    positionsIndex = 0;
+                    if (!isCancelled()) {
+                        fileText.getHighlighter().removeHighlight(highlights.get(positions.get(positionsIndex)));
+                        fileText.getHighlighter().addHighlight(positions.get(positionsIndex), positions.get(positionsIndex) + lastRequest.length(),
+                                orangeHighlightPainter);
+                        highlights.put(positions.get(positionsIndex), fileText.getHighlighter().getHighlights()[fileText.getHighlighter().getHighlights().length - 1]);
+                        fileText.setCaretPosition(positions.get(positionsIndex));
+                    }
+                    progressBar.setIndeterminate(false);
+                } catch (BadLocationException e) {
+                    e.printStackTrace();
+                }
+            }
         };
-        worker.execute();
     }
 
     public static void main(String[] args) {
