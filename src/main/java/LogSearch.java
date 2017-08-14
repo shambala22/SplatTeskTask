@@ -53,18 +53,18 @@ public class LogSearch {
     private Container getGUI() {
         gui = new JPanel(new BorderLayout(3,3));
         gui.setBorder(new EmptyBorder(5,5,5,5));
+        fileSystemView = FileSystemView.getFileSystemView();
+
         JPanel topPanel = new JPanel();
         topPanel.setLayout(new GridBagLayout());
-        JTextField searchField = new JTextField();
-        progressBar = new JProgressBar();
-        gui.add(topPanel, BorderLayout.NORTH);
-        fileSystemView = FileSystemView.getFileSystemView();
+
         JPanel fileView = new JPanel(new BorderLayout(3, 3));
         fileText = new JTextArea();
         fileText.setWrapStyleWord(true);
         fileText.setLineWrap(true);
         fileText.setEditable(false);
         fileView.add(new JScrollPane(fileText), BorderLayout.CENTER);
+
         JButton previousButton = new JButton("Previous");
         JButton nextButton = new JButton("Next");
         JPanel navigationButtons = new JPanel(new GridBagLayout());
@@ -73,16 +73,18 @@ public class LogSearch {
         buttonsConstraints.fill = GridBagConstraints.HORIZONTAL;
         navigationButtons.add(previousButton, buttonsConstraints);
         navigationButtons.add(nextButton, buttonsConstraints);
-        fileView.add(navigationButtons, BorderLayout.NORTH);
-
         previousButton.addActionListener(event -> {
             changeSelection(false);
         });
         nextButton.addActionListener(event -> {
             changeSelection(true);
         });
+        fileView.add(navigationButtons, BorderLayout.NORTH);
+
         DefaultMutableTreeNode root = new DefaultMutableTreeNode();
         treeModel = new DefaultTreeModel(root);
+
+        JTextField searchField = new JTextField();
         searchField.addActionListener(actionEvent -> {
             if (new File(pathField.getText()).exists()) {
                 searchPath = new File(pathField.getText());
@@ -161,7 +163,9 @@ public class LogSearch {
                 treeScroll,
                 fileView);
         splitPane.setDividerLocation(200);
+        gui.add(topPanel, BorderLayout.NORTH);
         gui.add(splitPane, BorderLayout.CENTER);
+        progressBar = new JProgressBar();
         gui.add(progressBar, BorderLayout.SOUTH);
         return gui;
     }
