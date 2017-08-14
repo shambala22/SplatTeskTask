@@ -2,7 +2,6 @@ import org.apache.commons.validator.routines.UrlValidator;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
-import javax.swing.border.LineBorder;
 import javax.swing.filechooser.FileSystemView;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultHighlighter;
@@ -15,7 +14,6 @@ import java.awt.*;
 import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ForkJoinPool;
 
@@ -73,12 +71,8 @@ public class LogSearch {
         buttonsConstraints.fill = GridBagConstraints.HORIZONTAL;
         navigationButtons.add(previousButton, buttonsConstraints);
         navigationButtons.add(nextButton, buttonsConstraints);
-        previousButton.addActionListener(event -> {
-            changeSelection(false);
-        });
-        nextButton.addActionListener(event -> {
-            changeSelection(true);
-        });
+        previousButton.addActionListener(event -> changeSelection(false));
+        nextButton.addActionListener(event -> changeSelection(true));
         fileView.add(navigationButtons, BorderLayout.NORTH);
 
         DefaultMutableTreeNode root = new DefaultMutableTreeNode();
