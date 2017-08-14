@@ -57,7 +57,7 @@ public class SearchTask extends RecursiveTask<Optional<DefaultMutableTreeNode>> 
                     fileScanner.close();
                     return true;
                 }
-                fileScanner.next();
+                fileScanner.nextLine();
             }
         } catch (FileNotFoundException e) {
             e.printStackTrace();
