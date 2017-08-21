@@ -26,6 +26,7 @@ public class LogSearch {
     private DefaultTreeModel treeModel;
     private FileSystemView fileSystemView;
     private JPanel gui;
+    private JPanel fileView;
     private JTextArea fileText;
     private JFileChooser chooser;
     private JTextField pathField;
@@ -56,7 +57,7 @@ public class LogSearch {
         JPanel topPanel = new JPanel();
         topPanel.setLayout(new GridBagLayout());
 
-        JPanel fileView = new JPanel(new BorderLayout(3, 3));
+        fileView = new JPanel(new BorderLayout(3, 3));
         fileText = new JTextArea();
         fileText.setWrapStyleWord(true);
         fileText.setLineWrap(true);
@@ -125,7 +126,7 @@ public class LogSearch {
         GridBagConstraints left = new GridBagConstraints();
         left.anchor = GridBagConstraints.EAST;
         GridBagConstraints right = new GridBagConstraints();
-        right.weightx = 2.0;
+        right.weightx = 1;
         right.fill = GridBagConstraints.HORIZONTAL;
         right.gridwidth = GridBagConstraints.REMAINDER;
         topPanel.add(new JLabel("Search "), left);
@@ -143,7 +144,7 @@ public class LogSearch {
                     (DefaultMutableTreeNode)treeSelectionEvent.getPath().getLastPathComponent();
             if (!((File)node.getUserObject()).isDirectory()) {
                 if (loadFileWorker != null && !loadFileWorker.isDone()) {
-                    System.out.println(loadFileWorker.cancel(true));
+                    loadFileWorker.cancel(true);
                 }
                 loadFileWorker = loadFile((File) node.getUserObject());
                 loadFileWorker.execute();
@@ -199,17 +200,12 @@ public class LogSearch {
         return new SwingWorker<Void, DefaultMutableTreeNode>() {
             @Override
             protected Void doInBackground() throws Exception {
-                for (File fileRoot : fileSystemView.getFiles(path, true)) {
-                    forkJoinPool.invoke(new SearchTask(fileRoot, searchRequest, extension, fileSystemView)).ifPresent(this::publish);
-                }
+                forkJoinPool.invoke(new SearchTask(path, searchRequest, extension, fileSystemView)).ifPresent(result -> {
+                    while (result.children().hasMoreElements()) {
+                        root.add((DefaultMutableTreeNode)result.children().nextElement());
+                    }
+                });
                 return null;
-            }
-
-            @Override
-            protected void process(java.util.List<DefaultMutableTreeNode> chunks) {
-                for (DefaultMutableTreeNode child : chunks) {
-                    root.add(child);
-                }
             }
 
             @Override
@@ -228,8 +224,8 @@ public class LogSearch {
             @Override
             protected Void doInBackground() throws Exception {
                 try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-                    fileText.read(reader, "Text");
                     fileText.getHighlighter().removeAllHighlights();
+                    fileText.read(reader, null);
                     Document document = fileText.getDocument();
                     for (int index = 0; index + lastRequest.length() < document.getLength(); index++) {
                         String match = document.getText(index, lastRequest.length());
@@ -283,8 +279,6 @@ public class LogSearch {
             frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             LogSearch search = new LogSearch();
             frame.setContentPane(search.getGUI());
-
-            frame.pack();
             frame.setSize(new Dimension(600, 600));
             frame.setVisible(true);
         });
